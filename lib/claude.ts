@@ -1,4 +1,3 @@
-```ts
 import { FormattedOrder } from './shopify';
 
 export interface AISummaryInput {

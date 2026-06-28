@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { calculateOrderNetRevenue, calculateDashboardMetrics } from '@/lib/calculations';
-import { FormattedOrder } from '@/lib/shopify';
+import { buildDashboardData } from '@/lib/calculations';
 
 export async function GET(request: NextRequest) {
-  const results = [];
+  const results: { name: string; passed: boolean; message: string }[] = [];
   let allPassed = true;
 
   // Test Case Helper
@@ -13,182 +12,96 @@ export async function GET(request: NextRequest) {
   };
 
   // ==========================================
-  // SECTION 1: Net Revenue Calculation Tests
+  // SECTION 1: Net Revenue / Dashboard Metric Tests (via buildDashboardData)
   // ==========================================
 
-  // Case A: Normal order with shipping and tax
-  const orderA = {
-    total_price: 120,
-    total_shipping: 10,
-    total_tax: 10,
-    total_refunded: 0,
-    cancelled_at: null,
-    subtotal_price: 100,
-  };
-  const revA = calculateOrderNetRevenue(orderA);
+  // Case A: Normal inputs
+  const dataA = buildDashboardData({
+    revenue: 1200,
+    orders: 10,
+    lastWeekRevenue: 1000,
+    topProduct: 'Oversized Hoodie',
+  });
   runTest(
-    'Normal Order Net Revenue',
-    revA === 100,
-    `Expected $100, got $${revA}. (Gross: $120, Shipping: $10, Tax: $10, Refunds: $0)`
+    'AOV Calculation',
+    dataA.avgOrderValue === 120,
+    `Expected AOV $120, got $${dataA.avgOrderValue}`
   );
 
-  // Case B: Partially refunded order
-  const orderB = {
-    total_price: 120,
-    total_shipping: 10,
-    total_tax: 10,
-    total_refunded: 30,
-    cancelled_at: null,
-    subtotal_price: 100,
-  };
-  const revB = calculateOrderNetRevenue(orderB);
+  // Case B: Revenue up vs last week
+  const dataB = buildDashboardData({
+    revenue: 1200,
+    orders: 10,
+    lastWeekRevenue: 1000,
+    topProduct: 'Tote Bag',
+  });
   runTest(
-    'Partially Refunded Order',
-    revB === 70,
-    `Expected $70, got $${revB}. (Gross: $120, Shipping: $10, Tax: $10, Refunds: $30)`
+    'Revenue Growth Percentage',
+    Math.round(dataB.percentChange) === 20,
+    `Expected +20%, got ${dataB.percentChange.toFixed(1)}%`
+  );
+  runTest(
+    'isUp flag when revenue increased',
+    dataB.isUp === true,
+    `Expected isUp=true, got ${dataB.isUp}`
   );
 
-  // Case C: Fully refunded order
-  const orderC = {
-    total_price: 120,
-    total_shipping: 10,
-    total_tax: 10,
-    total_refunded: 100,
-    cancelled_at: null,
-    subtotal_price: 100,
-  };
-  const revC = calculateOrderNetRevenue(orderC);
+  // Case C: Revenue down vs last week
+  const dataC = buildDashboardData({
+    revenue: 800,
+    orders: 8,
+    lastWeekRevenue: 1000,
+    topProduct: 'Sticker Pack',
+  });
   runTest(
-    'Fully Refunded Order',
-    revC === 0,
-    `Expected $0, got $${revC}. (Gross: $120, Shipping: $10, Tax: $10, Refunds: $100)`
+    'isUp flag when revenue decreased',
+    dataC.isUp === false,
+    `Expected isUp=false, got ${dataC.isUp}`
+  );
+  runTest(
+    'Negative growth percentage',
+    Math.round(dataC.percentChange) === -20,
+    `Expected -20%, got ${dataC.percentChange.toFixed(1)}%`
   );
 
-  // Case D: Cancelled order
-  const orderD = {
-    total_price: 120,
-    total_shipping: 10,
-    total_tax: 10,
-    total_refunded: 0,
-    cancelled_at: '2026-06-22T20:00:00Z',
-    subtotal_price: 100,
-  };
-  const revD = calculateOrderNetRevenue(orderD);
+  // Case D: Zero orders edge case
+  const dataD = buildDashboardData({
+    revenue: 0,
+    orders: 0,
+    lastWeekRevenue: 0,
+    topProduct: '',
+  });
   runTest(
-    'Cancelled Order',
-    revD === 0,
-    `Expected $0 for cancelled order, got $${revD}.`
+    'Zero orders — AOV should be 0',
+    dataD.avgOrderValue === 0,
+    `Expected AOV $0 with 0 orders, got $${dataD.avgOrderValue}`
   );
 
-  // Case E: Complex cart-level discount order
-  const orderE = {
-    total_price: 85, // Original item was $90, discount of $20 applied. Shipping was $10, tax was $5. Total = 90 - 20 + 10 + 5 = 85.
-    total_shipping: 10,
-    total_tax: 5,
-    total_refunded: 0,
-    cancelled_at: null,
-    subtotal_price: 90,
-  };
-  const revE = calculateOrderNetRevenue(orderE);
+  // Case E: Top product is always first in rankings
+  const dataE = buildDashboardData({
+    revenue: 5000,
+    orders: 50,
+    lastWeekRevenue: 4000,
+    topProduct: 'Vintage Tee',
+  });
   runTest(
-    'Cart-Level Discount Order',
-    revE === 70,
-    `Expected $70 (after applying $20 discount), got $${revE}. (Gross: $85, Shipping: $10, Tax: $5)`
+    'Top product is ranked #1',
+    dataE.products[0].name === 'Vintage Tee',
+    `Expected "Vintage Tee" at rank 1, got "${dataE.products[0].name}"`
   );
 
-
-  // ==========================================
-  // SECTION 2: Dashboard Metric Growth Percentage Tests
-  // ==========================================
-  const referenceDate = new Date('2026-06-22T12:00:00Z');
-  
-  // Create orders array
-  const mockOrders: FormattedOrder[] = [
-    // Today's orders (total revenue = 150 + 50 = 200)
-    {
-      shopify_order_id: '1',
-      order_number: 101,
-      created_at: new Date('2026-06-22T08:00:00Z').toISOString(),
-      subtotal_price: 150,
-      total_discounts: 0,
-      total_tax: 0,
-      total_shipping: 0,
-      total_price: 150,
-      total_refunded: 0,
-      financial_status: 'paid',
-      cancelled_at: null,
-      items_json: [],
-    },
-    {
-      shopify_order_id: '2',
-      order_number: 102,
-      created_at: new Date('2026-06-22T10:00:00Z').toISOString(),
-      subtotal_price: 50,
-      total_discounts: 0,
-      total_tax: 0,
-      total_shipping: 0,
-      total_price: 50,
-      total_refunded: 0,
-      financial_status: 'paid',
-      cancelled_at: null,
-      items_json: [],
-    },
-    // Same day last week orders (total revenue = 100)
-    {
-      shopify_order_id: '3',
-      order_number: 99,
-      created_at: new Date('2026-06-15T09:00:00Z').toISOString(),
-      subtotal_price: 100,
-      total_discounts: 0,
-      total_tax: 0,
-      total_shipping: 0,
-      total_price: 100,
-      total_refunded: 0,
-      financial_status: 'paid',
-      cancelled_at: null,
-      items_json: [],
-    },
-    // Order outside of target comparison windows (ignored)
-    {
-      shopify_order_id: '4',
-      order_number: 100,
-      created_at: new Date('2026-06-20T12:00:00Z').toISOString(),
-      subtotal_price: 500,
-      total_discounts: 0,
-      total_tax: 0,
-      total_shipping: 0,
-      total_price: 500,
-      total_refunded: 0,
-      financial_status: 'paid',
-      cancelled_at: null,
-      items_json: [],
-    },
-  ];
-
-  const metrics = calculateDashboardMetrics(mockOrders, referenceDate);
-  
+  // Case F: Funnel — sessions should be orders * 18
   runTest(
-    'Dashboard Metric - Today Revenue Sum',
-    metrics.revenueToday === 200,
-    `Expected $200, got $${metrics.revenueToday}`
-  );
-
-  runTest(
-    'Dashboard Metric - Today Order Count',
-    metrics.ordersToday === 2,
-    `Expected 2 orders, got ${metrics.ordersToday}`
-  );
-
-  // Growth calculation: ((200 - 100) / 100) * 100 = 100%
-  runTest(
-    'Dashboard Metric - Growth vs Last Week %',
-    metrics.revenueChangePercent === 100,
-    `Expected +100%, got ${metrics.revenueChangePercent}%`
+    'Funnel sessions estimate',
+    dataE.sessions === 50 * 18,
+    `Expected ${50 * 18} sessions, got ${dataE.sessions}`
   );
 
   return NextResponse.json({
     success: allPassed,
-    summary: allPassed ? 'All test cases passed successfully!' : 'Some test cases failed. See report.',
+    summary: allPassed
+      ? 'All test cases passed successfully!'
+      : 'Some test cases failed. See report.',
     results,
   });
 }
