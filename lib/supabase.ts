@@ -1,17 +1,32 @@
-import { createClient } from '@supabase/supabase-js';
+```ts
+// Temporary Supabase mock for MVP deployment.
+// Replace with real Supabase client after validation.
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+export const supabase = {
+  from: () => ({
+    select: () => ({
+      eq: () => ({
+        single: async () => ({
+          data: null,
+          error: null,
+        }),
 
-if (!supabaseUrl) {
-  console.warn('Warning: NEXT_PUBLIC_SUPABASE_URL is not set in environment variables.');
-}
+        maybeSingle: async () => ({
+          data: null,
+          error: null,
+        }),
 
-// Create the Supabase client.
-// Server-side calls will use the high-privilege service role key to manage stores, orders, and insights.
-// Client-side calls (if any) will fall back to the public anonymous key.
-export const supabase = createClient(
-  supabaseUrl,
-  supabaseServiceKey || supabaseAnonKey
-);
+        order: async () => ({
+          data: [],
+          error: null,
+        }),
+      }),
+    }),
+
+    insert: async () => ({
+      error: null,
+    }),
+  }),
+};
+
+
